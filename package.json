@@ -9,7 +9,7 @@
     "dev:electron": "set ELECTRON_DEV=1&& wait-on http://localhost:3000 && electron .",
     "dev":          "concurrently --kill-others \"npm run dev:next\" \"npm run dev:electron\"",
     "build":        "set ELECTRON_BUILD=1&& next build",
-    "build:win":    "npm run build && electron-builder --win",
+    "build:win": "npm run build && electron-builder --win --publish never",
     "start":        "next start",
     "lint":         "eslint src",
     "typecheck":    "echo \"TypeScript check skipped (JS project)\"",
