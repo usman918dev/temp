@@ -82,5 +82,82 @@ contextBridge.exposeInMainWorld('electronAPI', {
     delete:        (id)        => ipcRenderer.invoke('bookings:delete', id),
     recalcTotals:  (id)        => ipcRenderer.invoke('bookings:recalcTotals', id),
     todaySummary:  ()          => ipcRenderer.invoke('bookings:todaySummary'),
+    canClose:      (id)        => ipcRenderer.invoke('bookings:canClose', id),
+    setStatus:     (id, st, op)=> ipcRenderer.invoke('bookings:setStatus', id, st, op),
+  },
+
+  // ─── Payments ─────────────────────────────────────────────────────────────
+  payments: {
+    create:        (input)          => ipcRenderer.invoke('payments:create', input),
+    void:          (id, reason)     => ipcRenderer.invoke('payments:void', id, reason),
+    listByBooking: (bookingId)      => ipcRenderer.invoke('payments:listByBooking', bookingId),
+    listAll:       (filters)        => ipcRenderer.invoke('payments:listAll', filters),
+    summary:       (filters)        => ipcRenderer.invoke('payments:summary', filters),
+  },
+
+  // ─── Backup ───────────────────────────────────────────────────────────────
+  backup: {
+    create:        (options)        => ipcRenderer.invoke('backup:create', options),
+    chooseAndSave: ()               => ipcRenderer.invoke('backup:chooseAndSave'),
+    list:          ()               => ipcRenderer.invoke('backup:list'),
+    openFolder:    ()               => ipcRenderer.invoke('backup:openFolder'),
+  },
+
+  // ─── Availability (Phase 6) ───────────────────────────────────────────────
+  // checkClash: { available: bool, clashes: [] }
+  availability: {
+    checkClash:     (params)   => ipcRenderer.invoke('availability:checkClash', params),
+    getDresses:     (params)   => ipcRenderer.invoke('availability:getDresses', params),
+    getBookedRanges:(dressId)  => ipcRenderer.invoke('availability:getBookedRanges', dressId),
+    logOverride:    (params)   => ipcRenderer.invoke('availability:logOverride', params),
+  },
+
+  // ─── Search (Phase 7) ─────────────────────────────────────────────────────
+  // filters: { q, status, month, dateFrom, dateTo, dateField, cityId, castId, limit, offset }
+  search: {
+    query: (filters) => ipcRenderer.invoke('search:query', filters),
+    count: (filters) => ipcRenderer.invoke('search:count', filters),
+  },
+
+  // ─── Settings (Phase 8) ───────────────────────────────────────────────────
+  settings: {
+    get:    ()      => ipcRenderer.invoke('settings:get'),
+    update: (input) => ipcRenderer.invoke('settings:update', input),
+  },
+
+  // ─── Receipts & Printing (Phase 8) ────────────────────────────────────────
+  receipts: {
+    getData:      (bookingId) => ipcRenderer.invoke('receipts:getData', bookingId),
+    getPrinters:  ()          => ipcRenderer.invoke('receipts:getPrinters'),
+    generateHtml: (params)    => ipcRenderer.invoke('receipts:generateHtml', params),
+    print:        (params)    => ipcRenderer.invoke('receipts:print', params),
+    savePdf:      (params)    => ipcRenderer.invoke('receipts:savePdf', params),
+    recordPrint:  (bookingId) => ipcRenderer.invoke('receipts:recordPrint', bookingId),
+  },
+
+  // ─── Tracking (Phase 9 Delivery & Return) ─────────────────────────────────
+  tracking: {
+    listDeliveries:  (params) => ipcRenderer.invoke('tracking:listDeliveries', params),
+    listReturns:     (params) => ipcRenderer.invoke('tracking:listReturns', params),
+    markDelivered:   (params) => ipcRenderer.invoke('tracking:markDelivered', params),
+    unmarkDelivered: (bId)    => ipcRenderer.invoke('tracking:unmarkDelivered', bId),
+    markReturned:    (params) => ipcRenderer.invoke('tracking:markReturned', params),
+    unmarkReturned:  (bId)    => ipcRenderer.invoke('tracking:unmarkReturned', bId),
+    toggleItemReady: (params) => ipcRenderer.invoke('tracking:toggleItemReady', params),
+    summary:         ()       => ipcRenderer.invoke('tracking:summary'),
+  },
+
+  // ─── Reports & Exports (Phase 10) ─────────────────────────────────────────
+  reports: {
+    get:              (params) => ipcRenderer.invoke('reports:get', params),
+    generateHtml:     (params) => ipcRenderer.invoke('reports:generateHtml', params),
+    exportExcel:      (params) => ipcRenderer.invoke('reports:exportExcel', params),
+    exportPdf:        (params) => ipcRenderer.invoke('reports:exportPdf', params),
+    print:            (params) => ipcRenderer.invoke('reports:print', params),
+    exportEverything: (params) => ipcRenderer.invoke('reports:exportEverything', params),
+    printDailyPack:   (params) => ipcRenderer.invoke('reports:printDailyPack', params),
   },
 });
+
+
+

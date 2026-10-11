@@ -1,5 +1,5 @@
 # Progress
-Current phase: 4
+Current phase: 9
 Last updated: 2026-10-10
 
 - [x] Phase 0  Decisions and setup
@@ -7,11 +7,11 @@ Last updated: 2026-10-10
 - [x] Phase 2  Login, roles, audit
 - [x] Phase 3  Lists, customers, dresses
 - [x] Phase 4  Booking screen
-- [ ] Phase 5  Payments and status
-- [ ] Phase 6  Availability and clash
-- [ ] Phase 7  Search and filters
-- [ ] Phase 8  Receipts and printing
-- [ ] Phase 9  Delivery and return
+- [x] Phase 5  Payments and status
+- [x] Phase 6  Availability and clash
+- [x] Phase 7  Search and filters
+- [x] Phase 8  Receipts and printing
+- [x] Phase 9  Delivery and return
 - [ ] Phase 10 Reports and exports
 - [ ] Phase 11 Access migration
 - [ ] Phase 12 Backup and restore
@@ -61,7 +61,83 @@ Last updated: 2026-10-10
 
 ---
 
+## Phase 5 Implementation Status
+- **Payments Engine (`electron/payments/service.js` & IPC):**
+  - Advance payment captured atomically with booking creation (`advance_amount`, `advance_method`, `advance_date`, `advance_note`).
+  - Append-only ledger: records cannot be edited or deleted; corrections require voiding with a mandatory reason.
+  - Void permission strictly Owner-only (Cashiers rejected with audit logging).
+  - Live calculation: `remaining = Math.max(0, grand_total - sum(rental_payments where is_void = 0))`.
+  - Security deposits (`kind: 'deposit'`) tracked separately and never deducted from rental remaining balance.
+  - Live balance status: "Fully Paid ✓", "Overpaid (Rs X)", or "Remaining: Rs X".
+  - Payments dashboard (`/payments`) connected to real database with search, method filters, date filters, and live revenue stats.
+- **Booking Status Workflow:**
+  - Status transitions strictly validated (`None`, `Open`, `Pending`, `Closed`).
+  - `Closed` status guard: checks that all dresses are delivered, returned, and remaining balance is zero.
+  - Missing checklist modal: clearly lists missing items in friendly Urdu/English.
+  - Owner force-close override: Owner can close incomplete bookings with a logged override reason.
+- **Manual Backup Engine (`electron/backup/service.js` & IPC):**
+  - Uses safe SQLite online backup / `VACUUM INTO` ensuring zero data corruption during live operations.
+  - Pre-verifies database with `PRAGMA integrity_check` before export.
+  - Windows Save As native file dialog (`chooseAndSaveBackup`) for exporting directly to USB, external hard drive, or any user folder.
+  - Default folder quick backup and backup history manager with file sizes and timestamps.
+  - Dedicated Backup UI (`/backup`) with status badges, one-click manual export, and open folder button.
+
+---
+
+## Phase 8 Implementation Status
+- **Receipts Engine (`electron/receipts/service.js`, `template.js` & IPC):**
+  - High-performance HTML/CSS generator with offline font support & proper page breaks (`page-break-inside: avoid`).
+  - **Two Professional Layouts:**
+    - **80mm Thermal POS:** compact, high-contrast, dotted dividers, optimized for receipt printers.
+    - **A4 Full Sheet:** elegant invoice layout with customer & shop signature rows.
+  - Full bilingual Urdu & English support with RTL text alignment for notes, names, and terms.
+  - Direct hardware print via Electron `webContents.print` with printer selection and copies support.
+  - Native PDF export via Electron `webContents.printToPDF` and Windows native Save As dialog.
+  - Automatic reprint detection: increments `receipt_print_count` in DB and marks subsequent prints with prominent **DUPLICATE COPY / نقل** badge.
+  - Audited printing: every print event is logged to `audit_logs` (`RECEIPT_PRINTED`).
+  - Rule 10 Enforcement: receipt button is disabled with tooltip *"Save the booking first"* until booking is saved.
+  - "Save & Print" button on booking form atomically saves and opens print preview.
+  - Reprint button integrated on Bookings list (`/bookings`) and Search results (`/search`).
+- **Settings & Hardware Preferences (`electron/settings/service.js` & `/settings` UI):**
+  - Persistent SQLite `settings` table with atomic upserts and audit logging.
+  - Configurable shop name, tagline, address, phone 1, phone 2, and city.
+  - Configurable Urdu & English return terms and policies.
+  - Layout default preference (80mm vs A4) and printer selection per layout.
+  - Toggle for "DUPLICATE / نقل" stamp on reprints.
+  - Settings page connected to real DB with Owner-only authorization guard.
+
+---
+
+## Phase 9 Implementation Status
+- **Database Schema & Migrations:**
+  - Added tracking fields to `bookings`: `delivery_note`, `return_damage_note`, `return_damage_photo`.
+  - Added night-before prep and item tracking fields to `booking_items`: `is_ready` (BOOLEAN DEFAULT 0), `item_condition` (TEXT DEFAULT 'OK').
+  - Safe automatic `ALTER TABLE` migrations executed on startup for existing SQLite databases.
+- **Tracking Engine (`electron/tracking/service.js` & IPC):**
+  - `listDeliveries`: filters by `today`, `tomorrow`, `upcoming` (next 7 days), `pending`, `delivered`, or custom date, with live item breakdown and ready states.
+  - `toggleItemReady`: atomic per-dress night-before preparation tick with full audit logging.
+  - `markDelivered`: records delivery date (default today), handover note, auto-sets all items ready, promotes status to `Open`, audited.
+  - `unmarkDelivered`: operational correction rollback with audit trail.
+  - `listReturns`: tracks returns with exact `days_late` and `is_overdue` calculation; filters by `all`, `overdue`, `due_today`, `pending`, `returned`.
+  - `markReturned`: condition choice (`OK`, `Needs cleaning`, `Damaged`), damage/cleaning note, optional photo path.
+  - **Return Flow Prompts Automation:**
+    - Refund Security Deposit: automatically writes payment ledger record with `kind: 'deposit_refund'` using selected method (`cash`/`bank`).
+    - Collect Remaining Balance: automatically records payment with `kind: 'rental'` using selected method (`cash`/`bank`).
+    - Settle & Close: validates Rule 6 / closing eligibility (delivered, returned, remaining is 0) and closes booking (or Owner force-close override with logged reason).
+  - `unmarkReturned`: operational correction rollback with audit trail.
+  - `getTrackingSummary`: real-time counts for Home counters (deliveries today, returns due, overdue returns, pending balance bookings).
+- **Dashboard & UI Enhancements:**
+  - **Deliveries Tracker (`/deliveries`):** filter chips, preparation checklist ticks per dress line, remaining balance warning alerts, mark delivered modal, receipt reprint button.
+  - **Returns Tracker (`/returns`):** filter chips, prominent red pulsating overdue badge showing exact days late (e.g. `2 din late`), condition selector, integrated return settling prompt checkboxes (deposit refund, remaining balance collection, auto-close).
+  - **Booking Screen (`/bookings/new`):** high-visibility Tracking Status Banner displaying live Delivered & Returned status chips, handover note, condition, and quick links to tracker screens.
+  - **Bookings List (`/bookings`):** Delivered and Returned status chips directly in delivery and return date columns, with overdue alerts.
+  - **Home Dashboard (`/dashboard`):** live stat cards deep-linked to pre-filtered tracking views (`/deliveries?filter=today`, `/returns?filter=due_today`, `/returns?filter=overdue`).
+
+---
+
 ## Verification & Tests
-- `npm test`: **72 / 72 unit tests passed** (including Phase 2 auth/audit, Phase 3 customers/dresses/lists, and Phase 4 booking calculation and business logic suites).
+- `npm test`: **121 / 121 unit tests passed** (0 failures, 13 dedicated tests for Phase 9 deliveries, returns, item prep ticks, return prompts, and overdue calculations).
 - `npm run lint`: **0 errors, 0 warnings** (Clean ESLint check across all dashboard pages).
-- `npm run build`: **Compiled & exported successfully** across all 17 static routes.
+- `npm run build`: **Compiled & exported successfully** across all 19 static routes via Next.js Turbopack.
+
+

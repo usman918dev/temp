@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 const http = require('http');
@@ -9,6 +9,13 @@ const { createListsService }   = require('./lists/service');
 const { createCustomersService } = require('./customers/service');
 const { createDressesService } = require('./dresses/service');
 const { createBookingsService } = require('./bookings/service');
+const { createPaymentsService } = require('./payments/service');
+const { createBackupService }   = require('./backup/service');
+const { createAvailabilityService } = require('./availability/service');
+const { createSearchService }   = require('./search/service');
+const { createSettingsService } = require('./settings/service');
+const { createTrackingService } = require('./tracking/service');
+const { createReportsService } = require('./reports/service');
 
 const isDev = process.env.ELECTRON_DEV === '1';
 const sessions = new Map();
@@ -17,6 +24,14 @@ let lists;
 let customers;
 let dresses;
 let bookings;
+let payments;
+let backup;
+let availability;
+let search;
+let settingsService;
+let receiptsService;
+let tracking;
+let reports;
 let staticServer = null;
 
 function getSession(event) { return sessions.get(event.sender.id); }
@@ -176,11 +191,19 @@ let appPort = 3000;
 // ─── App lifecycle ──────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   const db  = getDb();
-  auth      = createAuthService(db);
-  lists     = createListsService(db);
-  customers = createCustomersService(db);
-  dresses   = createDressesService(db, app);
-  bookings  = createBookingsService(db);
+  auth         = createAuthService(db);
+  lists        = createListsService(db);
+  customers    = createCustomersService(db);
+  dresses      = createDressesService(db, app);
+  bookings     = createBookingsService(db);
+  payments     = createPaymentsService(db);
+  backup       = createBackupService(db, app, dialog, shell);
+  availability = createAvailabilityService(db);
+  search       = createSearchService(db);
+  settingsService = createSettingsService(db);
+  receiptsService = createReceiptsService(db, settingsService, bookings);
+  tracking        = createTrackingService(db, bookings, payments);
+  reports         = createReportsService(db, settingsService);
 
   seedDefaults();
 
@@ -264,8 +287,63 @@ ipcMain.handle('bookings:nextNo',      safeHandler((_e)               => ({ ok: 
 ipcMain.handle('bookings:create',      safeHandler((event, input)     => ({ ok: true, ...bookings.create(getSession(event), input) })));
 ipcMain.handle('bookings:update',      safeHandler((event, id, input) => bookings.update(getSession(event), id, input)));
 ipcMain.handle('bookings:delete',      safeHandler((event, id)        => bookings.softDelete(getSession(event), id)));
-ipcMain.handle('bookings:recalcTotals',safeHandler((_e, id)           => { bookings.recalcTotals(id); return { ok: true }; }));
-ipcMain.handle('bookings:todaySummary',safeHandler((_e)               => ({ ok: true, data: bookings.todaySummary() })));
+ipcMain.handle('bookings:todaySummary',safeHandler((event)             => ({ ok: true, data: tracking ? tracking.getTrackingSummary(getSession(event)) : bookings.todaySummary() })));
+ipcMain.handle('bookings:canClose',    safeHandler((_e, id)           => ({ ok: true, data: bookings.canClose(id) })));
+ipcMain.handle('bookings:setStatus',   safeHandler((event, id, st, op)=> bookings.setStatus(getSession(event), id, st, op)));
+
+// ─── IPC — Payments ────────────────────────────────────────────────────────
+ipcMain.handle('payments:create',       safeHandler((event, input)      => ({ ok: true, ...payments.create(getSession(event), input) })));
+ipcMain.handle('payments:void',         safeHandler((event, id, reason) => payments.voidPayment(getSession(event), id, { reason })));
+ipcMain.handle('payments:listByBooking',safeHandler((event, bookingId)  => ({ ok: true, data: payments.listByBooking(getSession(event), bookingId) })));
+ipcMain.handle('payments:listAll',      safeHandler((event, filters)    => ({ ok: true, data: payments.listAll(getSession(event), filters) })));
+ipcMain.handle('payments:summary',      safeHandler((event, filters)    => ({ ok: true, data: payments.getSummary(getSession(event), filters) })));
+
+// ─── IPC — Backup ──────────────────────────────────────────────────────────
+ipcMain.handle('backup:create',       safeHandler((event, options)    => backup.createBackup(getSession(event), options)));
+ipcMain.handle('backup:chooseAndSave',safeHandler((event)             => backup.chooseAndSaveBackup(getSession(event))));
+ipcMain.handle('backup:list',         safeHandler((event)             => ({ ok: true, data: backup.listBackups(getSession(event)) })));
+ipcMain.handle('backup:openFolder',   safeHandler((event)             => backup.openBackupFolder(getSession(event))));
+
+// ─── IPC — Availability (Phase 6) ──────────────────────────────────────────
+ipcMain.handle('availability:checkClash',    safeHandler((event, params)  => ({ ok: true, data: availability.checkClash(getSession(event), params) })));
+ipcMain.handle('availability:getDresses',    safeHandler((event, params)  => ({ ok: true, data: availability.getAvailability(getSession(event), params) })));
+ipcMain.handle('availability:getBookedRanges', safeHandler((event, dressId) => ({ ok: true, data: availability.getBookedRanges(getSession(event), dressId) })));
+ipcMain.handle('availability:logOverride',   safeHandler((event, params)  => availability.logClashOverride(getSession(event), params)));
+
+// ─── IPC — Search (Phase 7) ─────────────────────────────────────────────────
+ipcMain.handle('search:query',  safeHandler((event, filters) => ({ ok: true, data: search.search(getSession(event), filters) })));
+ipcMain.handle('search:count',  safeHandler((event, filters) => ({ ok: true, ...search.count(getSession(event), filters) })));
+
+// ─── IPC — Settings (Phase 8) ───────────────────────────────────────────────
+ipcMain.handle('settings:get',    safeHandler((event)        => ({ ok: true, data: settingsService.getSettings(getSession(event)) })));
+ipcMain.handle('settings:update', safeHandler((event, input) => settingsService.updateSettings(getSession(event), input)));
+
+// ─── IPC — Receipts & Printing (Phase 8) ────────────────────────────────────
+ipcMain.handle('receipts:getData',      safeHandler((event, bookingId) => receiptsService.getReceiptData(getSession(event), bookingId)));
+ipcMain.handle('receipts:getPrinters',  safeHandler((event)            => ({ ok: true, data: receiptsService.getPrinters(getSession(event)) })));
+ipcMain.handle('receipts:generateHtml', safeHandler((event, params)    => receiptsService.generateHtml(getSession(event), params)));
+ipcMain.handle('receipts:print',        safeHandler((event, params)    => receiptsService.printDirect(getSession(event), params)));
+ipcMain.handle('receipts:savePdf',      safeHandler((event, params)    => receiptsService.savePdf(getSession(event), params)));
+ipcMain.handle('receipts:recordPrint',  safeHandler((event, bookingId) => receiptsService.recordPrint(getSession(event), bookingId)));
+
+// ─── IPC — Tracking (Phase 9 Delivery & Return) ───────────────────────────
+ipcMain.handle('tracking:listDeliveries',  safeHandler((event, params) => ({ ok: true, data: tracking.listDeliveries(getSession(event), params) })));
+ipcMain.handle('tracking:listReturns',     safeHandler((event, params) => ({ ok: true, data: tracking.listReturns(getSession(event), params) })));
+ipcMain.handle('tracking:markDelivered',   safeHandler((event, params) => tracking.markDelivered(getSession(event), params)));
+ipcMain.handle('tracking:unmarkDelivered', safeHandler((event, bId)    => tracking.unmarkDelivered(getSession(event), bId)));
+ipcMain.handle('tracking:markReturned',    safeHandler((event, params) => tracking.markReturned(getSession(event), params)));
+ipcMain.handle('tracking:unmarkReturned',  safeHandler((event, bId)    => tracking.unmarkReturned(getSession(event), bId)));
+ipcMain.handle('tracking:toggleItemReady', safeHandler((event, params) => tracking.toggleItemReady(getSession(event), params)));
+ipcMain.handle('tracking:summary',         safeHandler((event)         => ({ ok: true, data: tracking.getTrackingSummary(getSession(event)) })));
+
+// ─── IPC — Reports (Phase 10) ──────────────────────────────────────────────
+ipcMain.handle('reports:get',              safeHandler((event, params) => ({ ok: true, data: reports.getReportData(getSession(event), params) })));
+ipcMain.handle('reports:generateHtml',     safeHandler((event, params) => reports.generateReportHtml(getSession(event), params)));
+ipcMain.handle('reports:exportExcel',      safeHandler((event, params) => reports.exportExcel(getSession(event), params)));
+ipcMain.handle('reports:exportPdf',        safeHandler((event, params) => reports.exportPdf(getSession(event), params)));
+ipcMain.handle('reports:print',            safeHandler((event, params) => reports.printDirect(getSession(event), params)));
+ipcMain.handle('reports:exportEverything', safeHandler((event, params) => reports.exportEverything(getSession(event), params)));
+ipcMain.handle('reports:printDailyPack',   safeHandler((event, params) => reports.printDailyPack(getSession(event), params)));
 
 // ─── IPC — App ─────────────────────────────────────────────────────────────
 ipcMain.handle('app:version',  safeHandler((event) => { protect(event, [ROLES.OWNER, ROLES.CASHIER, ROLES.VIEWER]); return app.getVersion(); }));

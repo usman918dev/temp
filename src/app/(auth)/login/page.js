@@ -14,12 +14,7 @@ export default function LoginPage() {
   const [loading, setLoading]           = useState(false);
 
   useEffect(() => {
-    const auth = window.electronAPI?.auth;
-    if (!auth) return;
-
-    auth.needsSetup()
-      .then(result => setNeedsSetup(result.needsSetup))
-      .catch(() => setError('App backend se connect nahi ho saka.'));
+    window.electronAPI?.auth.needsSetup().then(result => setNeedsSetup(result.needsSetup));
   }, []);
 
   const handleLogin = async (e) => {
@@ -27,38 +22,26 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    const auth = window.electronAPI?.auth;
-    if (!auth) {
-      setError('Login sirf Electron desktop app mein available hai.');
-      setLoading(false);
-      return;
+    const result = needsSetup
+      ? await window.electronAPI.auth.setupOwner({ username, password, fullName })
+      : await window.electronAPI.auth.login({ username, password });
+
+    if (result.ok !== false) {
+      const user = needsSetup
+        ? { username: username.trim().toLowerCase(), name: fullName.trim(), role: 'owner' }
+        : result.user;
+      localStorage.setItem('ifrah_user', JSON.stringify({
+        username:  user.username,
+        name:      user.name,
+        role:      user.role,
+        loginTime: new Date().toISOString(),
+      }));
+      router.push('/dashboard');
+    } else {
+      setError(result.message || 'Username ya password galat hai. Dobara try karein.');
     }
 
-    try {
-      const result = needsSetup
-        ? await auth.setupOwner({ username, password, fullName })
-        : await auth.login({ username, password });
-
-      if (result.ok !== false) {
-        const user = needsSetup
-          ? { username: username.trim().toLowerCase(), name: fullName.trim(), role: 'owner' }
-          : result.user;
-        localStorage.setItem('ifrah_user', JSON.stringify({
-          username:  user.username,
-          name:      user.name,
-          role:      user.role,
-          loginTime: new Date().toISOString(),
-        }));
-        router.push('/dashboard');
-      } else {
-        setError(result.message || 'Username ya password galat hai. Dobara try karein.');
-      }
-    } catch (loginError) {
-      console.error('[Login]', loginError);
-      setError('Login ke waqt app backend se connection toot gaya.');
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   };
 
   return (
